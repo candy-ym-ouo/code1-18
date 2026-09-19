@@ -45,10 +45,18 @@ pnpm build
 - `PATCH /v1/chapters/:id`
 - `POST /v1/chapters/:id/blocks`
 - `POST /v1/chapters/:id/publish`
+- `GET /v1/chapters/:id/export?format=html|markdown|json`（章节排版导出）
 - `GET /v1/workspaces/:id/events`
 - `GET /v1/realtime?workspaceId=...`（WebSocket）
 
 健康检查为 `GET /health` 和 `GET /ready`。
+
+## 章节导出
+
+`packages/export`（`@history/export`）是章节排版渲染模块：把内容块与音频引用编排成可导出文稿，经 `GET /v1/chapters/:id/export` 提供 `html`（默认，自包含可打印）、`markdown`、`json` 三种格式，支持 `paginate`、`pageLines`、`lineWidth` 参数。
+
+- 缺引用时局部降级：片段被删除或录音未就绪的块渲染为占位块并计入 `warnings`（响应头 `X-Export-Warnings`），其余内容正常导出。
+- 分页不截断时间标记：`[00:01:02.500 – 00:02:10.000]` 这类时间标记在分词阶段即原子化，换行与分页只发生在标记边界；HTML 输出另用 `white-space: nowrap` 保护。
 
 ## 存储
 

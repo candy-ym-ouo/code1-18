@@ -7,11 +7,11 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "pnpm --filter @history/contracts build && node scripts/with-env.mjs pnpm --parallel --filter @history/api --filter @history/web --filter @history/worker dev",
+    "dev": "pnpm --filter @history/contracts --filter @history/export build && node scripts/with-env.mjs pnpm --parallel --filter @history/api --filter @history/web --filter @history/worker dev",
     "build": "node scripts/with-env.mjs pnpm -r build",
-    "lint": "pnpm --filter @history/contracts build && pnpm -r lint",
-    "typecheck": "pnpm --filter @history/contracts build && pnpm -r typecheck",
-    "test": "pnpm --filter @history/contracts build && pnpm -r test",
+    "lint": "pnpm --filter @history/contracts --filter @history/export build && pnpm -r lint",
+    "typecheck": "pnpm --filter @history/contracts --filter @history/export build && pnpm -r typecheck",
+    "test": "pnpm --filter @history/contracts --filter @history/export build && pnpm -r test",
     "db:generate": "node scripts/with-env.mjs pnpm --filter @history/api prisma:generate",
     "db:migrate": "node scripts/with-env.mjs pnpm --filter @history/api prisma:migrate",
     "db:push": "node scripts/with-env.mjs pnpm --filter @history/api prisma:push"

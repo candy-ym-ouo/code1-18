@@ -23,6 +23,12 @@ import {
   clipSchema,
   clipUpdateSchema,
 } from '@history/contracts';
+import {
+  composeChapter,
+  paginateDocument,
+  renderHtmlDocument,
+  renderMarkdownDocument,
+} from '@history/export';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
 const ALLOWED_AUDIO_EXTENSIONS = /\.(aac|aiff|flac|m4a|mp3|mp4|oga|ogg|opus|wav|webm)$/i;
@@ -63,6 +69,18 @@ const workspaceCreateSchema = z
   .strict();
 
 const sequenceSchema = z.coerce.number().int().nonnegative().default(0);
+
+const chapterExportQuerySchema = z
+  .object({
+    format: z.enum(['html', 'markdown', 'json']).default('html'),
+    paginate: z
+      .enum(['true', 'false', '1', '0'])
+      .optional()
+      .transform((value) => value !== 'false' && value !== '0'),
+    pageLines: z.coerce.number().int().min(8).max(200).default(36),
+    lineWidth: z.coerce.number().int().min(24).max(160).default(64),
+  })
+  .strict();
 
 type AuthUser = { id: string; email: string };
 type JwtRequest = FastifyRequest & { user: AuthUser };
@@ -106,12 +124,12 @@ await app.register(multipart, {
 });
 await app.register(websocket);
 
-function validationError<T>(schema: z.ZodType<T>, value: unknown): T {
+function validationError<S extends z.ZodTypeAny>(schema: S, value: unknown): z.output<S> {
   const parsed = schema.safeParse(value);
   if (!parsed.success) {
     throw new HttpError(400, 'INVALID_INPUT', '输入格式不正确', parsed.error.flatten());
   }
-  return parsed.data;
+  return parsed.data as z.output<S>;
 }
 
 async function authenticate(req: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -877,6 +895,86 @@ app.post('/v1/chapters/:id/publish', { preHandler: authenticate }, async (req, r
     return updated;
   });
   return { data: published };
+});
+
+app.get('/v1/chapters/:id/export', { preHandler: authenticate }, async (req, reply) => {
+  const chapterId = (req.params as { id: string }).id;
+  const chapter = await prisma.chapter.findUnique({
+    where: { id: chapterId },
+    include: {
+      blocks: {
+        orderBy: { position: 'asc' },
+        include: {
+          clip: {
+            include: { recording: { select: { title: true, status: true } } },
+          },
+        },
+      },
+    },
+  });
+  if (!chapter) throw new HttpError(404, 'NOT_FOUND', '章节不存在');
+  await requireMembership(req, chapter.workspaceId);
+
+  const query = validationError(chapterExportQuerySchema, req.query ?? {});
+  const document = composeChapter({
+    title: chapter.title,
+    intro: chapter.intro,
+    blocks: chapter.blocks.map((block) => ({
+      id: block.id,
+      type: block.type,
+      content: block.contentJson,
+      clipId: block.clipId,
+      // 软删除的片段按引用缺失处理，仅该块降级为占位块
+      clip:
+        block.clip && !block.clip.deletedAt
+          ? {
+              id: block.clip.id,
+              title: block.clip.title,
+              startMs: block.clip.startMs,
+              endMs: block.clip.endMs,
+              summary: block.clip.summary,
+              transcript: block.clip.transcript,
+              recordingTitle: block.clip.recording.title,
+              recordingStatus: block.clip.recording.status,
+            }
+          : null,
+    })),
+  });
+
+  const generatedAt = new Date();
+  reply.header('X-Export-Warnings', String(document.warnings.length));
+
+  if (query.format === 'json') {
+    return {
+      data: {
+        document,
+        pages: query.paginate
+          ? paginateDocument(document, {
+              pageLines: query.pageLines,
+              lineWidth: query.lineWidth,
+            })
+          : null,
+      },
+    };
+  }
+
+  const safeName = encodeURIComponent(chapter.title.slice(0, 60) || 'chapter');
+  if (query.format === 'markdown') {
+    reply
+      .type('text/markdown; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename*=UTF-8''${safeName}.md`);
+    return renderMarkdownDocument(document, { generatedAt });
+  }
+
+  reply
+    .type('text/html; charset=utf-8')
+    .header('Content-Disposition', `attachment; filename*=UTF-8''${safeName}.html`);
+  return renderHtmlDocument(document, {
+    paginate: query.paginate,
+    pageLines: query.pageLines,
+    lineWidth: query.lineWidth,
+    generatedAt,
+  });
 });
 
 app.get('/v1/workspaces/:id/events', { preHandler: authenticate }, async (req) => {

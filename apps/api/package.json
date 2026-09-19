@@ -20,6 +20,7 @@
     "@fastify/multipart": "^9.0.3",
     "@fastify/websocket": "^11.0.1",
     "@history/contracts": "workspace:*",
+    "@history/export": "workspace:*",
     "@prisma/client": "^6.0.1",
     "argon2": "^0.31.2",
     "bullmq": "^5.28.2",
