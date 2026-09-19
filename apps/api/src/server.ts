@@ -23,6 +23,13 @@ import {
   clipSchema,
   clipUpdateSchema,
 } from '@history/contracts';
+import {
+  composeChapter,
+  paginate,
+  renderHtml,
+  renderText,
+  type ExportChapterInput,
+} from '@history/exporter';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
 const ALLOWED_AUDIO_EXTENSIONS = /\.(aac|aiff|flac|m4a|mp3|mp4|oga|ogg|opus|wav|webm)$/i;
@@ -63,6 +70,14 @@ const workspaceCreateSchema = z
   .strict();
 
 const sequenceSchema = z.coerce.number().int().nonnegative().default(0);
+
+const chapterExportQuerySchema = z
+  .object({
+    format: z.enum(['html', 'text', 'json']).default('html'),
+    lineCells: z.coerce.number().int().min(4).max(200).optional(),
+    pageLines: z.coerce.number().int().min(4).max(200).optional(),
+  })
+  .strict();
 
 type AuthUser = { id: string; email: string };
 type JwtRequest = FastifyRequest & { user: AuthUser };
@@ -877,6 +892,84 @@ app.post('/v1/chapters/:id/publish', { preHandler: authenticate }, async (req, r
     return updated;
   });
   return { data: published };
+});
+
+app.get('/v1/chapters/:id/export', { preHandler: authenticate }, async (req, reply) => {
+  const chapterId = (req.params as { id: string }).id;
+  const chapter = await prisma.chapter.findUnique({
+    where: { id: chapterId },
+    include: {
+      blocks: {
+        orderBy: { position: 'asc' },
+        include: {
+          clip: {
+            include: {
+              recording: { select: { id: true, title: true, status: true } },
+              speakerPerson: { select: { name: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+  if (!chapter) throw new HttpError(404, 'NOT_FOUND', '章节不存在');
+  await requireMembership(req, chapter.workspaceId);
+
+  const query = validationError(chapterExportQuerySchema, req.query ?? {});
+  const input: ExportChapterInput = {
+    id: chapter.id,
+    title: chapter.title,
+    intro: chapter.intro,
+    blocks: chapter.blocks.map((block) => ({
+      id: block.id,
+      type: block.type,
+      position: block.position,
+      content: block.contentJson,
+      clipId: block.clipId,
+      clip: block.clip
+        ? {
+            id: block.clip.id,
+            title: block.clip.title,
+            startMs: block.clip.startMs,
+            endMs: block.clip.endMs,
+            summary: block.clip.summary,
+            transcript: block.clip.transcript,
+            deletedAt: block.clip.deletedAt,
+            speakerName: block.clip.speakerPerson?.name ?? null,
+            recording: block.clip.recording
+              ? {
+                  id: block.clip.recording.id,
+                  title: block.clip.recording.title,
+                  status: block.clip.recording.status,
+                }
+              : null,
+          }
+        : null,
+    })),
+  };
+
+  const document = paginate(composeChapter(input), query);
+  if (query.format === 'json') {
+    return { data: document };
+  }
+
+  const safeTitle = chapter.title.trim() || 'chapter';
+  if (query.format === 'text') {
+    return reply
+      .type('text/plain; charset=utf-8')
+      .header(
+        'Content-Disposition',
+        `attachment; filename*=UTF-8''${encodeURIComponent(`${safeTitle}.txt`)}`,
+      )
+      .send(renderText(document));
+  }
+  return reply
+    .type('text/html; charset=utf-8')
+    .header(
+      'Content-Disposition',
+      `attachment; filename*=UTF-8''${encodeURIComponent(`${safeTitle}.html`)}`,
+    )
+    .send(renderHtml(document));
 });
 
 app.get('/v1/workspaces/:id/events', { preHandler: authenticate }, async (req) => {

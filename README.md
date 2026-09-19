@@ -2,6 +2,8 @@
 
 React + TypeScript 前端、Fastify API、BullMQ worker、PostgreSQL 和 Redis 组成的 pnpm monorepo。当前版本支持注册登录、创建工作区、上传真实音频、异步读取音频时长、创建固定时间范围片段、按时间段播放，以及章节/内容块和发布接口。
 
+`packages/exporter` 是章节排版渲染模块：把章节的内容块与音频引用编排成分页文稿并导出为 HTML / 纯文本 / JSON。引用缺失的内容块会局部降级为占位标注（不影响其余内容导出），时间标记作为原子单元排版，换行与分页都不会将其截断。
+
 ## 环境要求
 
 - Node.js 22.13 或更高版本
@@ -45,6 +47,7 @@ pnpm build
 - `PATCH /v1/chapters/:id`
 - `POST /v1/chapters/:id/blocks`
 - `POST /v1/chapters/:id/publish`
+- `GET /v1/chapters/:id/export?format=html|text|json`（导出排版后的章节文稿，可用 `lineCells`、`pageLines` 调整版式）
 - `GET /v1/workspaces/:id/events`
 - `GET /v1/realtime?workspaceId=...`（WebSocket）
 
